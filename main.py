@@ -213,7 +213,9 @@ def create_accelerogram(stream, output_dir="accelerograms"):
         print(f"Created accelerogram: {filename}")
 
 def create_sonification(stream, output_dir="sonification"):
-    """Create WAV files from seismic data"""
+
+    volume_factor=100.0
+    """Create WAV files from seismic data with minimal filtering to preserve original characteristics"""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -232,15 +234,33 @@ def create_sonification(stream, output_dir="sonification"):
         samples_needed = int(len(data) * (target_sample_rate / tr.stats.sampling_rate))
         data = signal.resample(data, samples_needed)
         
-        # Apply frequency shift to make the signal more audible
-        # (Optional) Time compression - speeds up playback
-        time_compression = 10  # Play 10x faster
+        # Preserve more noise by avoiding heavy filtering
+        # Just apply minimal highpass to remove DC offset/drift
+        if len(data) > 10:
+            sos = signal.butter(2, 0.05, 'highpass', fs=target_sample_rate, output='sos')
+            data = signal.sosfilt(sos, data)
+        
+        # Apply less time compression to preserve more signal character
+        time_compression = 20  # Play 5x faster instead of 10x
         data = signal.resample(data, len(data) // time_compression)
+        
+        # Add back some noise
+        noise_level = 0.02  # 2% noise
+        noise = np.random.normal(0, noise_level, size=len(data))
+        data = data + noise
+
+        # Volume factor
+        data = data*volume_factor
+        
+        # Re-normalize after adding noise
+        if np.max(np.abs(data)) > 1.0:
+            data = data / np.max(np.abs(data))
         
         # Save as WAV file
         filename = f"{output_dir}/{tr.stats.network}_{tr.stats.station}_{tr.stats.location}_{tr.stats.channel}.wav"
         wavfile.write(filename, target_sample_rate, data.astype(np.float32))
         print(f"Created sonification: {filename}")
+
 
 def process_and_classify_all(base_dir, region):
     """Process all files, generate accelerograms and sonifications with classification"""
@@ -275,10 +295,11 @@ def process_and_classify_all(base_dir, region):
 if __name__ == "__main__":
     base_dir = '.'  # Adjust to your path
     regions = ['eastern-siberia', 'el-salvador', 'hawaii', 
-               'honshu-japan', 'java-indonesia', 'north-honduras', 'puerto-rico']
+               'honshu-japan', 'java-indonesia', 'north-honduras', 'puerto-rico',
+               'myanmar', 'southern-alaska', 'taiwan-region']
     
     # Process a specific region
-    # region = 'eastern-siberia'  # Change to process different regions
+    # region = 'taiwan-region'  # Change to process different regions
     # process_and_classify_all(base_dir, region)
     
     # Uncomment to process all regions
